@@ -39,12 +39,12 @@ class EntryRepository {
     );
   }
 
-  /// DELETE (NOW USING ID)
+  /// DELETE
   Future<void> delete(Entry entry) async {
     final db = await DatabaseHelper.instance.database;
 
     try {
-      await _sheetService.deleteById(entry.id);
+      await _sheetService.deleteById(entry.id); // ✅ correct method
     } catch (e) {
       print("❌ Sheet delete failed: $e");
     }
@@ -72,7 +72,7 @@ class EntryRepository {
     return result.map((e) => Entry.fromMap(e)).toList();
   }
 
-  /// ✅ PRO SYNC (ID BASED)
+  /// ✅ CLEAN SYNC (NO OLD METHODS)
   Future<void> syncToGoogleSheets() async {
     final db = await DatabaseHelper.instance.database;
 

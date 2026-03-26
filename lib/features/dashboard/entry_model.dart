@@ -1,4 +1,3 @@
-// lib/features/dashboard/entry_model.dart
 class Entry {
   String id;
   String name;
@@ -7,8 +6,9 @@ class Entry {
   String variant;
   String color;
   double amount;
-  String date; // e.g., 25 Mar 2026
-  String time; // e.g., 3:30 PM
+  String date;
+  String time;
+  int? sheetRow; // <--- Add this
 
   Entry({
     required this.id,
@@ -20,6 +20,7 @@ class Entry {
     required this.amount,
     required this.date,
     required this.time,
+    this.sheetRow,
   });
 
   Map<String, dynamic> toMap() {
@@ -33,6 +34,7 @@ class Entry {
       'amount': amount,
       'date': date,
       'time': time,
+      'sheetRow': sheetRow,
     };
   }
 
@@ -47,6 +49,7 @@ class Entry {
       amount: (map['amount'] as num).toDouble(),
       date: map['date'],
       time: map['time'],
+      sheetRow: map['sheetRow'], // <-- parse it
     );
   }
 }

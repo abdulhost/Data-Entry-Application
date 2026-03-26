@@ -1,10 +1,15 @@
-// lib/features/dashboard/dashboard_screen.dart
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+
 import 'entry_form_screen.dart';
 import 'entry_model.dart';
 import 'entry_repository.dart';
-
 import '../profile/profile_screen.dart';
+
+// Theme controller
+ValueNotifier<ThemeMode> appTheme = ValueNotifier(ThemeMode.light);
+
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
 
@@ -12,21 +17,88 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-// Simple theme manager using ValueNotifier
-ValueNotifier<ThemeMode> appTheme = ValueNotifier(ThemeMode.light);
-
 class _DashboardScreenState extends State<DashboardScreen> {
   List<Entry> _entries = [];
   final _repo = EntryRepository();
+
   final _searchController = TextEditingController();
   String _query = '';
+
+  bool _isOnline = false;
+  bool _isSyncing = false;
+
+  late StreamSubscription _connectivitySubscription;
 
   @override
   void initState() {
     super.initState();
     _loadEntries();
+    _initConnectivity();
   }
 
+  @override
+  void dispose() {
+    _connectivitySubscription.cancel();
+    super.dispose();
+  }
+
+  /// 🌐 INIT INTERNET LISTENER
+  void _initConnectivity() async {
+    final result = await Connectivity().checkConnectivity();
+    _updateConnection(result);
+
+    _connectivitySubscription =
+        Connectivity().onConnectivityChanged.listen(_updateConnection);
+  }
+
+  void _updateConnection(ConnectivityResult result) {
+    final wasOffline = !_isOnline;
+
+    setState(() {
+      _isOnline = result != ConnectivityResult.none;
+    });
+
+    // ⚡ Auto sync when internet returns
+    if (_isOnline && wasOffline) {
+      _autoSync();
+    }
+  }
+
+  /// 🔄 AUTO SYNC
+  Future<void> _autoSync() async {
+    await _syncData(showMessage: true);
+  }
+
+  /// 🔄 MANUAL + AUTO SYNC HANDLER
+  Future<void> _syncData({bool showMessage = false}) async {
+    if (!_isOnline) {
+      if (showMessage) {
+        _showSnack('No internet connection');
+      }
+      return;
+    }
+
+    setState(() => _isSyncing = true);
+
+    try {
+      await _repo.syncToGoogleSheets(); // 👈 YOU WILL IMPLEMENT THIS
+
+      if (showMessage) {
+        _showSnack('Synced successfully ✅');
+      }
+    } catch (e) {
+      _showSnack('Sync failed ❌');
+    } finally {
+      setState(() => _isSyncing = false);
+    }
+  }
+
+  void _showSnack(String msg) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  /// 📥 LOAD DATA
   Future<void> _loadEntries() async {
     final entries = await _repo.getEntries(query: _query);
     setState(() => _entries = entries);
@@ -38,58 +110,78 @@ class _DashboardScreenState extends State<DashboardScreen> {
       MaterialPageRoute(
         builder: (_) => EntryFormScreen(
           entry: entry,
-          onSaved: _loadEntries,
+          onSaved: () async {
+            await _loadEntries();
+            await _syncData(); // auto sync after add/edit
+          },
         ),
       ),
     );
   }
 
   void _viewEntry(Entry entry) {
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      builder: (_) => AlertDialog(
-        title: Text(entry.name),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+      isScrollControlled: true,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Wrap(
           children: [
-            Text('Phone: ${entry.phone}'),
-            Text('Address: ${entry.address}'),
-            Text('Variant: ${entry.variant}'),
-            Text('Color: ${entry.color}'),
-            Text('Amount: ${entry.amount}'),
-            Text('Date: ${entry.date}'),
-            Text('Time: ${entry.time}'),
+            Text(entry.name,
+                style:
+                const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            _infoRow('Phone', entry.phone),
+            _infoRow('Address', entry.address),
+            _infoRow('Variant', entry.variant),
+            _infoRow('Color', entry.color),
+            _infoRow('Amount', '₹ ${entry.amount}'),
+            _infoRow('Date', entry.date),
+            _infoRow('Time', entry.time),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
+      ),
+    );
+  }
+
+  Widget _infoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Text('$label: ',
+              style: const TextStyle(fontWeight: FontWeight.w600)),
+          Expanded(child: Text(value)),
         ],
       ),
     );
   }
 
-  Future<void> _confirmDelete(String id) async {
+  Future<void> _confirmDelete(Entry entry) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Confirm Delete'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Delete Entry'),
         content: const Text('Are you sure you want to delete this entry?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Delete')),
         ],
       ),
     );
+
     if (confirmed ?? false) {
-      await _repo.delete(id);
-      _loadEntries();
+      await _repo.delete(entry); // ✅ FIXED
+      await _loadEntries();
+      await _syncData();
     }
   }
-
   void _searchEntries() {
     setState(() => _query = _searchController.text.trim());
     _loadEntries();
@@ -98,7 +190,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void _handleMenu(String value) {
     switch (value) {
       case 'profile':
-      // Navigate to ProfileScreen
         Navigator.push(
           context,
           MaterialPageRoute(builder: (_) => const ProfileScreen()),
@@ -106,44 +197,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
         break;
 
       case 'theme':
-      // Toggle theme
         appTheme.value =
         appTheme.value == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
         break;
-      case 'contact':
-        showDialog(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('Contact Info'),
-            content: const Text('Abdul\nPhone: 94893'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
+
+      case 'sync':
+        _syncData(showMessage: true);
         break;
+
       case 'logout':
-      // Correct logout navigation
         Navigator.pushReplacementNamed(context, '/login');
         break;
     }
   }
 
+  /// 🔍 SEARCH BAR
   Widget _buildSearchBar() {
     return Padding(
-      padding: const EdgeInsets.all(8.0),
+      padding: const EdgeInsets.all(16),
       child: TextField(
         controller: _searchController,
         onChanged: (_) => _searchEntries(),
         decoration: InputDecoration(
-          labelText: 'Search by name, phone, address, variant, color',
+          hintText: 'Search entries...',
+          filled: true,
+          fillColor: Colors.white,
           prefixIcon: const Icon(Icons.search),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: BorderSide.none,
+          ),
           suffixIcon: IconButton(
-            icon: const Icon(Icons.clear),
+            icon: const Icon(Icons.close),
             onPressed: () {
               _searchController.clear();
               _searchEntries();
@@ -154,34 +239,64 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  /// 📋 ENTRY CARD
   Widget _buildEntryCard(Entry entry) {
-    return Card(
-      color: Colors.blue.shade50,
-      margin: const EdgeInsets.symmetric(vertical: 5, horizontal: 10),
-      child: ListTile(
-        title: Text(entry.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text('${entry.phone} • ${entry.address}\n${entry.date} • ${entry.time}'),
-        isThreeLine: true,
-        trailing: Wrap(
-          spacing: 8,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.visibility, color: Colors.blue),
-              tooltip: 'View',
-              onPressed: () => _viewEntry(entry),
-            ),
-            IconButton(
-              icon: const Icon(Icons.edit, color: Colors.green),
-              tooltip: 'Edit',
-              onPressed: () => _openForm(entry),
-            ),
-            IconButton(
-              icon: const Icon(Icons.delete, color: Colors.red),
-              tooltip: 'Delete',
-              onPressed: () => _confirmDelete(entry.id),
-            ),
-          ],
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Material(
+        elevation: 3,
+        borderRadius: BorderRadius.circular(16),
+        child: ListTile(
+          title: Text(entry.name,
+              style: const TextStyle(fontWeight: FontWeight.bold)),
+          subtitle: Text('${entry.phone}\n${entry.date} • ${entry.time}'),
+          isThreeLine: true,
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                  icon: const Icon(Icons.visibility, color: Colors.blue),
+                  onPressed: () => _viewEntry(entry)),
+              IconButton(
+                  icon: const Icon(Icons.edit, color: Colors.green),
+                  onPressed: () => _openForm(entry)),
+              IconButton(
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  onPressed: () => _confirmDelete(entry)),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_entries.isEmpty) {
+      return const Center(child: Text('No entries found'));
+    }
+
+    return RefreshIndicator(
+      onRefresh: () async {
+        await _loadEntries();
+        await _syncData();
+      },
+      child: ListView.builder(
+        padding: const EdgeInsets.only(bottom: 80),
+        itemCount: _entries.length,
+        itemBuilder: (_, i) => _buildEntryCard(_entries[i]),
+      ),
+    );
+  }
+
+  /// 🟢 INTERNET INDICATOR
+  Widget _buildStatusDot() {
+    return Container(
+      margin: const EdgeInsets.only(right: 12),
+      width: 12,
+      height: 12,
+      decoration: BoxDecoration(
+        color: _isOnline ? Colors.green : Colors.red,
+        shape: BoxShape.circle,
       ),
     );
   }
@@ -191,14 +306,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Dashboard'),
+        backgroundColor: Colors.blue,
         actions: [
+          _buildStatusDot(),
+          if (_isSyncing)
+            const Padding(
+              padding: EdgeInsets.only(right: 12),
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
           PopupMenuButton<String>(
             onSelected: _handleMenu,
-            itemBuilder: (_) => [
-              const PopupMenuItem(value: 'profile', child: Text('Profile')),
-              const PopupMenuItem(value: 'theme', child: Text('Toggle Theme')),
-              const PopupMenuItem(value: 'contact', child: Text('Contact')),
-              const PopupMenuItem(value: 'logout', child: Text('Logout')),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'profile', child: Text('Profile')),
+              PopupMenuItem(value: 'theme', child: Text('Toggle Theme')),
+              PopupMenuItem(value: 'sync', child: Text('Sync Now')),
+              PopupMenuItem(value: 'logout', child: Text('Logout')),
             ],
           ),
         ],
@@ -206,19 +332,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
       body: Column(
         children: [
           _buildSearchBar(),
-          Expanded(
-            child: _entries.isEmpty
-                ? const Center(child: Text('No entries found'))
-                : ListView.builder(
-              itemCount: _entries.length,
-              itemBuilder: (_, index) => _buildEntryCard(_entries[index]),
-            ),
-          ),
+          Expanded(child: _buildBody()),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openForm(),
-        child: const Icon(Icons.add),
+        icon: const Icon(Icons.add),
+        label: const Text('Add Entry'),
       ),
     );
   }

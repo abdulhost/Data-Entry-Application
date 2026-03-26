@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'core/theme/theme_provider.dart';
 import 'features/splash/splash_screen.dart';
 import 'package:provider/provider.dart';
-import 'package:flutter/material.dart';
 import 'features/auth/login_screen.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/profile/profile_screen.dart';
+import 'core/repositories/entry_repository.dart';
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await EntryRepository().syncToGoogleSheets();
 
-void main() {
   runApp(const MyApp());
 }
 

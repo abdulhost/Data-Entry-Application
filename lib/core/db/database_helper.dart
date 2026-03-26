@@ -26,7 +26,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 2, // ⚡ Increment version if schema changed
+      version: 7, // ⚡ Increment version if schema changed
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -41,16 +41,18 @@ class DatabaseHelper {
       address TEXT,
       variant TEXT,
       color TEXT,
-      amount TEXT,
+      amount REAL,
       date TEXT,
-      time TEXT
+      time TEXT,
+      isSynced INTEGER DEFAULT 0,
+      sheetRow INTEGER
     )
     ''');
   }
 
   // Migration handler
   Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 2) {
+    if (oldVersion < 7) {
       // If table existed before, drop and recreate (dev only)
       await db.execute('DROP TABLE IF EXISTS entries');
       await _createDB(db, newVersion);

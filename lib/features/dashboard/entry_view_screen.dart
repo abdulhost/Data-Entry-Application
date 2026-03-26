@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'entry_model.dart';
-
+import 'package:intl/intl.dart';
 class EntryViewScreen extends StatelessWidget {
   final Entry entry;
   final VoidCallback? onEdit;
